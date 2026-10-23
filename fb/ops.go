@@ -93,6 +93,13 @@ type groupRef struct {
 	Engine *Engine `kit:"inject"`
 }
 
+type groupFeedRef struct {
+	Ref    string  `kit:"arg" help:"group id, or slug with a session"`
+	Limit  int     `kit:"flag,inherit" help:"max results"`
+	Sort   string  `kit:"flag" help:"post order: feed|newest (creation time; undated posts last)"`
+	Engine *Engine `kit:"inject"`
+}
+
 type eventRef struct {
 	Ref    string  `kit:"arg" help:"event id or permalink"`
 	Engine *Engine `kit:"inject"`
@@ -346,8 +353,8 @@ func getGroup(ctx context.Context, in groupRef, emit func(*Group) error) error {
 	return emit(&g)
 }
 
-func listGroupFeed(ctx context.Context, in groupRef, emit func(*Post) error) error {
-	g, err := in.Engine.GroupFeed(ctx, in.Ref, in.Limit)
+func listGroupFeed(ctx context.Context, in groupFeedRef, emit func(*Post) error) error {
+	g, err := in.Engine.GroupFeedWithOptions(ctx, in.Ref, GroupFeedOptions{Limit: in.Limit, Sort: in.Sort})
 	if err != nil {
 		return MapErr(err)
 	}

@@ -85,6 +85,24 @@ Tier 1 is two cookies from a browser you are already signed into, and it buys ex
 fb auth import --c-user <id> --xs <token>
 ```
 
+Read a group's discussion using the saved session:
+
+```sh
+fb group feed <group-id-or-slug> -n 20 --no-cache
+fb group feed <group-id-or-slug> -n 20 --sort newest --no-cache
+```
+
+The limit includes pinned posts. When the initial page contains only pinned
+posts and a section header, `fb` replays the page's discussion query with a
+larger story count. It preserves Facebook's ordering and warns if more units
+remain but the page supplies no usable pagination query.
+
+`--sort newest` requests Facebook's chronological view and orders posts by
+creation time before applying the limit. Pinned posts follow the same date
+ordering; posts without a creation timestamp go last. The default `--sort feed`
+keeps Facebook's ordering. This changes post ordering, not comment ordering,
+and the same retrieval limits still apply.
+
 ## Every record says what it did not see
 
 ```json

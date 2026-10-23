@@ -470,10 +470,14 @@ func newGroupCmd() kit.Command {
 }
 
 func newGroupFeedCmd() kit.Command {
+	var order string
 	return kit.Command{
 		Use:   "feed <id|slug>",
 		Short: "A group's discussion, as deep as asked",
 		Args:  kit.ExactArgs(1),
+		Flags: func(f *kit.FlagSet) {
+			f.StringVar(&order, "sort", "feed", "post order: feed|newest (creation time; undated posts last)")
+		},
 		Run: func(ctx context.Context, args []string) error {
 			a := appFromCtx(ctx)
 			a.target = args[0]
@@ -481,7 +485,7 @@ func newGroupFeedCmd() kit.Command {
 			if err != nil {
 				return a.done(err)
 			}
-			g, err := eng.GroupFeed(a.ctx(), args[0], a.limit)
+			g, err := eng.GroupFeedWithOptions(a.ctx(), args[0], fb.GroupFeedOptions{Limit: a.limit, Sort: order})
 			if err != nil {
 				return a.done(err)
 			}

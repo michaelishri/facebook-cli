@@ -136,6 +136,9 @@ func applyGroupFeed(g *Group, data any) {
 		g.Name = digStr(data, "group", "name")
 	}
 	seen := map[string]bool{}
+	for _, p := range g.Posts {
+		seen[p.ID] = true
+	}
 	add := func(p Post) {
 		// A unit with no post id is not a post: the section header naming the
 		// sort order, the end-of-feed marker, a join prompt. Testing for the id
@@ -172,4 +175,7 @@ func applyGroupFeed(g *Group, data any) {
 		add(parseStory(n))
 	}
 	g.PostsCursor = digStr(feed, "page_info", "end_cursor")
+	if more, ok := dig(feed, "page_info", "has_next_page").(bool); ok && !more {
+		g.PostsCursor = ""
+	}
 }

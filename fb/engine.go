@@ -3,6 +3,8 @@ package fb
 import (
 	"context"
 	"errors"
+	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -769,10 +771,35 @@ func (e *Engine) Group(ctx context.Context, ref string) (Group, error) {
 // This is the deepest free read in the tool: the discussion query is not on the
 // refused list, so the cursor can actually be spent signed out.
 func (e *Engine) GroupFeed(ctx context.Context, ref string, limit int) (Group, error) {
-	limit = e.limit(limit, 20)
+	return e.GroupFeedWithOptions(ctx, ref, GroupFeedOptions{Limit: limit})
+}
+
+// GroupFeedOptions controls the discussion window and its ordering.
+type GroupFeedOptions struct {
+	Limit int
+	Sort  string // feed (default) or newest (by post creation time)
+}
+
+// GroupFeedWithOptions can request new posts rather than the group's default
+// ranking. Sort before limiting so pinned stories cannot displace newer posts.
+func (e *Engine) GroupFeedWithOptions(ctx context.Context, ref string, opt GroupFeedOptions) (Group, error) {
+	if opt.Sort != "" && opt.Sort != "feed" && opt.Sort != "newest" {
+		return Group{}, usage("unknown group sort %q: use feed or newest", opt.Sort)
+	}
+	limit := e.limit(opt.Limit, 20)
 	r, err := fbid.Group(ref)
 	if err != nil {
 		return Group{}, usage("%s", err.Error())
+	}
+	if opt.Sort == "newest" {
+		u, err := url.Parse(r.URL)
+		if err != nil {
+			return Group{}, err
+		}
+		q := u.Query()
+		q.Set("sorting_setting", "CHRONOLOGICAL")
+		u.RawQuery = q.Encode()
+		r.URL = u.String()
 	}
 	p, err := e.get(ctx, r.URL, "the feed of group "+r.ID, "CometGroupDiscussionRootSuccessQuery", "CometGroupRootQuery")
 	if err != nil {
@@ -785,7 +812,28 @@ func (e *Engine) GroupFeed(ctx context.Context, ref string, limit int) (Group, e
 	e.stamp(&out.Envelope, p)
 
 	pre, ok := preloadOf(p, "CometGroupDiscussionRootSuccessQuery")
-	if !ok {
+	// Some builds preload only a section header and the pinned stories. Their
+	// root query has story counts, but no cursor argument. Replay that query
+	// with a larger initial window before looking for a pagination operation.
+	if ok && !hasAny(pre, cursorKeys) && (len(out.Posts) < limit || opt.Sort == "newest") {
+		vars := map[string]any{}
+		for _, key := range []string{"regular_stories_count", "regular_stories_stream_initial_count"} {
+			if _, exists := pre.Variables[key]; exists {
+				// The section header consumes one unit in the regular feed.
+				vars[key] = limit + 1
+			}
+		}
+		if len(vars) > 0 && (e.allow(surfaceGraphQL) || e.allow(surfaceSession)) {
+			d, err := e.c.Replay(ctx, p, pre, vars)
+			if err != nil {
+				out.miss(surfaceGraphQL, "the group discussion query is not replayable here: "+err.Error())
+			} else {
+				applyGroupFeed(&out, d.Data)
+				out.addSurface(surfaceGraphQL)
+			}
+		}
+	}
+	if !ok || !hasAny(pre, cursorKeys) {
 		pre, ok = feedPreload(p)
 	}
 	for len(out.Posts) < limit && out.PostsCursor != "" && ok {
@@ -800,8 +848,19 @@ func (e *Engine) GroupFeed(ctx context.Context, ref string, limit int) (Group, e
 			break
 		}
 	}
+	if opt.Sort == "newest" {
+		sort.SliceStable(out.Posts, func(i, j int) bool {
+			return out.Posts[i].CreatedAt.After(out.Posts[j].CreatedAt)
+		})
+	}
 	if len(out.Posts) > limit {
 		out.Posts = out.Posts[:limit]
+	}
+	if len(out.Posts) < limit && out.PostsCursor != "" && !ok {
+		out.miss(surfaceGraphQL, "the group has more discussion units, but the page shipped no cursor-capable feed query")
+	}
+	for i := range out.Posts {
+		out.Posts[i].Envelope = out.Envelope
 	}
 	if len(out.Posts) == 0 {
 		return out, noResults("group %s shows no posts signed out", r.ID)
